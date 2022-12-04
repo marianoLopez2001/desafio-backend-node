@@ -1,145 +1,155 @@
-const express = require('express');
-const ProductosApi = require("./productosApi")
-const handlebars = require('express-handlebars');
+const express = require('express')
+const { Router } = express
+const fs = require('fs')
 
-const PORT = 8080;
 const app = express()
+const PORT = 8080
 
-// MIDDLEWARES
-
+//MIDDLEWARE PARA TRABAJAR CON ARCHIVOS JSON
 app.use(express.json())
 app.use(express.urlencoded({ extended: true }))
 
-const productos = new ProductosApi()
-const arrayProductos = productos.mostrarTodos()
+//CONFIG DE RUTAS ROUTER
+const routerCarrito = new Router()
+const routerProductos = new Router()
 
-//CONFIG DE ENGINE DE HANDLEBARS
+app.use('/api/carrito', routerCarrito)
+app.use('/api/productos', routerProductos)
 
-app.engine('hbs',
-    handlebars.engine({
-        extname: ".hbs",
-        defaultLayout: "index.hbs",
-        layoutsDir: __dirname + "/views/pages",
-        partialsDir: __dirname + "/views/partials",
-    }))
+//MIDDLEWARE QUE VERIFICA EL ROL ADMIN
 
-app.set("views", "./views")
-app.set("view engine", "ejs")
+function mdwAdmin(req, res, next) {
+    if (req.query.rol !== "admin") {
+        res.json({ error: "acceso no permitido", descripcion: "ruta x con metodo y no autorizada" })
+        //http://localhost:8080/api/productos?rol=admin
+        return
+    }
+    next()
+}
 
-app.get("/", (req, res) => {
-    res.render("pages/index", { arrayProductos })
+//CONFIG DE RUTAS DE PRODUCTOS
+
+routerProductos.get("/", (req, res) => {
+    const productos = fs.readFileSync('productos.json', 'utf-8')
+    res.json(JSON.parse(productos))
 })
 
-app.get("/productos", (req, res) => {
-    res.render("pages/productos", { arrayProductos, layout: false })
+routerProductos.get("/:id", (req, res) => { //http://localhost:8080/api/productos/5
+    const lectura = fs.readFileSync("productos.json", "utf-8")
+    const objEncontrado = JSON.parse(lectura).find(i => i.id === parseInt(req.params.id))
+    objEncontrado ? res.json(objEncontrado) : res.json({ Error: "Objeto no encontrado" })
 })
 
-app.post("/productos", (req, res) => {
-    productos.guardarProducto(req.body)
-    res.redirect("/")
+routerProductos.post("/", mdwAdmin, (req, res) => {
+    const lectura = fs.readFileSync('productos.json', "utf-8")
+    const lecturaParseada = JSON.parse(lectura)
+    let id = lecturaParseada.length + 1
+    const objetoNuevo = { ...req.body, id: id, timestamp: Date.now() }
+    lecturaParseada.push(objetoNuevo)
+    fs.writeFileSync('productos.json', JSON.stringify(lecturaParseada), "utf-8")
+    res.json({ exito: "producto agregado" })
 })
 
-const server = app.listen(PORT, () => {
-    console.log(`servidor expres desde el puerto: ${PORT}`);
+routerProductos.put("/:id", mdwAdmin, (req, res) => {
+    const lectura = fs.readFileSync('productos.json', "utf-8")
+    const lecturaParseada = JSON.parse(lectura)
+    const objEncontrado = lecturaParseada.find(i => i.id === parseInt(req.params.id))
+    if (!objEncontrado) {
+        res.json({ Error: "Objeto no encontrado" })
+        return
+    }
+    const newObj = { ...req.body, id: objEncontrado.id, timestamp: objEncontrado.timestamp, ultimaModificacion: Date.now() }
+    lecturaParseada.splice(lecturaParseada.indexOf(objEncontrado), 1, newObj)
+    fs.writeFileSync('productos.json', JSON.stringify(lecturaParseada), 'utf-8')
+    res.json({ exito: "producto modificado" })
 })
 
-server.on("error", error => {
-    console.log(error);
+routerProductos.delete("/:id", mdwAdmin, (req, res) => {
+    const lectura = fs.readFileSync('productos.json', "utf-8")
+    const lecturaParseada = JSON.parse(lectura)
+    const objEncontrado = lecturaParseada.find(i => i.id === parseInt(req.params.id))
+    if (!objEncontrado) {
+        res.json({ Error: "Objeto no encontrado" })
+        return
+    }
+    const newLectura = lecturaParseada.filter(i => i.id !== objEncontrado.id)
+    fs.writeFileSync('productos.json', JSON.stringify(newLectura), "utf-8")
+    res.json({ exito: "producto eliminado" })
+})
+
+//CONFIG DE RUTAS DE CARRITO
+
+routerCarrito.post('/', (req, res) => {
+    const lectura = fs.readFileSync('carrito.json', "utf-8")
+    const lecturaParseada = JSON.parse(lectura)
+    let id = lecturaParseada.length + 1
+    lecturaParseada.push({ id: id, timestamp: Date.now(), productos: [] })
+    fs.writeFileSync('carrito.json', JSON.stringify(lecturaParseada), 'utf-8')
+    res.json({ "exito": "carrito creado" })
+})
+
+routerCarrito.delete('/:id', (req, res) => {
+    const lectura = fs.readFileSync('carrito.json', "utf-8")
+    const lecturaParseada = JSON.parse(lectura)
+    const carritoEncontrado = lecturaParseada.find(i => i.id === parseInt(req.params.id))
+    console.log(carritoEncontrado, req.params.id);
+    if (!carritoEncontrado) {
+        res.json({ Error: "Carrito no encontrado" })
+        return
+    }
+    const carritoFiltrado = lecturaParseada.filter(i => i.id !== carritoEncontrado.id)
+    fs.writeFileSync('carrito.json', JSON.stringify(carritoFiltrado), 'utf-8')
+    res.json({ exito: "carrito eliminado" })
+})
+
+routerCarrito.get('/:id/productos', (req, res) => {
+    const lectura = fs.readFileSync('carrito.json', "utf-8")
+    const lecturaParseada = JSON.parse(lectura)
+    const carrito = lecturaParseada[req.params.id - 1]
+    if (!carrito) {
+        res.json({ Error: "Carrito no encontrado" })
+        return
+    }
+    const productos = carrito.productos
+    res.json({ exito: `producto del carrito ${req.params.id} mostrados con exito`, productos })
 })
 
 
+routerCarrito.post('/:id/productos', (req, res) => {
+    const lectura = fs.readFileSync('carrito.json', "utf-8")
+    const lecturaParseada = JSON.parse(lectura)
+    const carrito = lecturaParseada[req.params.id - 1]
+    if (!carrito) {
+        res.json({ Error: "Carrito no encontrado" })
+        return
+    }
+    let id = lecturaParseada[parseInt(req.params.id - 1)].productos.length + 1
+    const newObj = { ...req.body, id: id, timestamp: Date.now() }
+    carrito.productos.push(newObj)
+    fs.writeFileSync('carrito.json', JSON.stringify(lecturaParseada), 'utf-8')
+    res.json({ exito: "exito" })
+})
 
+routerCarrito.delete('/:id/productos/:id_prod', (req, res) => {
+    const lectura = fs.readFileSync('carrito.json', "utf-8")
+    const lecturaParseada = JSON.parse(lectura)
+    const carrito = lecturaParseada[parseInt(req.params.id - 1)]
+    if (!carrito) {
+        res.json({ Error: "Carrito no encontrado" })
+        return
+    }
+    const objEncontrado = carrito.productos.find(i => i.id === parseInt(req.params.id_prod))
+    if (!objEncontrado) {
+        res.json({ Error: "Objeto no encontrado" })
+        return
+    }
+    lecturaParseada[parseInt(req.params.id - 1)].productos.splice(lecturaParseada[parseInt(req.params.id - 1)].productos.indexOf(objEncontrado), 1)
+    fs.writeFileSync('carrito.json', JSON.stringify(lecturaParseada), 'utf-8')
+    res.json({ exito: "producto elminado" })
+})
 
+//-------------------------------------
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// router.get("/productos", (req, res) => { //RUTA /API/PROUCTOS
-//     res.json({ productos, productos })
-// })
-
-// router.get("/productos/:id", (req, res) => { //RUTA /API/PROUCTOS/:ID
-//     const productoEncontrado = productos.find(i => parseInt(i.id) === parseInt(req.params.id))
-//     if (!productoEncontrado) {
-//         res.json({ error: "producto no encontrado" })
-//     } else {
-//         res.json(productoEncontrado)
-//     }
-// })
-
-// //RUTAS CON METODO POST
-
-// router.post("/productos", (req, res) => {
-//     const newObj = req.body
-//     productos.push({ ...newObj, id: productos.length + 1 })
-//     res.json("recibida")
-// })
-
-// //RUTA CON METODO PUT
-
-// router.put("/productos/:id", (req, res) => {
-//     const { title, price, thumbnail } = req.body
-//     const { id } = req.params
-//     productos[parseInt(id - 1)].title = title
-//     productos[parseInt(id - 1)].price = price
-//     productos[parseInt(id - 1)].thumbnail = thumbnail
-//     res.json("producto modificado")
-// })
-
-// //RUTA CON METODO DELETE SEGUN EL ID
-
-// router.delete("/productos/:id", (req, res) => {
-//     const productoEncontrado = productos.find(i => parseInt(i.id) === parseInt(req.params.id))
-//     if (!productoEncontrado) {
-//         res.json({ error: "producto no encontrado" })
-//     } else {
-//         productos.splice(productos.indexOf(productoEncontrado), 1)
-//         res.send("Producto eliminado")
-//     }
-// })
-
-
-
-
-
-
+app.listen(PORT, (req, res) => {
+    console.log("server ok en", PORT);
+}) 

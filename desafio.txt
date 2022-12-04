@@ -1,4 +1,0 @@
-Por escrito, indicar cual de los tres motores de plantilla preferis y por qué.
-
-Creo que me quedo con ejs, aunque me parece casi igual a pug con pug no pude usar el extends y el block por alguna razon.
-
